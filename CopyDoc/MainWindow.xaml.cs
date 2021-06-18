@@ -47,6 +47,30 @@ namespace CopyDoc
             {
                 using (bw = new BackgroundWorker())
                 {
+                    var timer = new System.Timers.Timer(1000D);
+                    timer.Elapsed += (sender, e) =>
+                    {
+                        // Remember only the last 30 snapshots; discard older snapshots
+                        if (snapshots.Count == 30)
+                        {
+                            snapshots.Dequeue();
+                        }
+
+                        snapshots.Enqueue(Interlocked.Exchange(ref currentBytesTransferred, 0L));
+                        var averageSpeed = snapshots.Average();
+                        var bytesLeft = fileSize - totalBytesTransferred;
+                        Console.WriteLine("Average speed: {0:#} MBytes / second", averageSpeed / (1024 * 1024));
+                        if (averageSpeed > 0)
+                        {
+                            var timeLeft = TimeSpan.FromSeconds(bytesLeft / averageSpeed);
+                            var timeLeftRounded = TimeSpan.FromSeconds(Math.Round(timeLeft.TotalSeconds));
+                            Console.WriteLine("Time left: {0}", timeLeftRounded);
+                        }
+                        else
+                        {
+                            Console.WriteLine("Time left: Infinite");
+                        }
+                    };
                     bw.WorkerSupportsCancellation = true;
                     bw.DoWork += OnCopy;
                 }
@@ -72,30 +96,7 @@ namespace CopyDoc
         {
             using (var dialog = new System.Windows.Forms.FolderBrowserDialog())
             {
-                var timer = new System.Timers.Timer(1000D);
-                timer.Elapsed += (sender, e) =>
-                {
-                    // Remember only the last 30 snapshots; discard older snapshots
-                    if (snapshots.Count == 30)
-                    {
-                        snapshots.Dequeue();
-                    }
-
-                    snapshots.Enqueue(Interlocked.Exchange(ref currentBytesTransferred, 0L));
-                    var averageSpeed = snapshots.Average();
-                    var bytesLeft = fileSize - totalBytesTransferred;
-                    Console.WriteLine("Average speed: {0:#} MBytes / second", averageSpeed / (1024 * 1024));
-                    if (averageSpeed > 0)
-                    {
-                        var timeLeft = TimeSpan.FromSeconds(bytesLeft / averageSpeed);
-                        var timeLeftRounded = TimeSpan.FromSeconds(Math.Round(timeLeft.TotalSeconds));
-                        Console.WriteLine("Time left: {0}", timeLeftRounded);
-                    }
-                    else
-                    {
-                        Console.WriteLine("Time left: Infinite");
-                    }
-                };
+                
 
                 dialog.ShowNewFolderButton = true;
                 dialog.UseDescriptionForTitle = true;
