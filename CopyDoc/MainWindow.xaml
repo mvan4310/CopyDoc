@@ -23,7 +23,8 @@
                     <Button x:Name="btnTargetSelect" Content="..." HorizontalAlignment="Left" VerticalAlignment="Center" Width="25" Height="25" Click="btnTargetSelect_Click"/>
                 </StackPanel>
             </StackPanel>
-            <Button x:Name="btnAction" Content="Start" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,30,0,0" Width="100" Height="50" Click="btnAction_Click"/>
+            <CheckBox x:Name="cbOverwrite" IsChecked="false" Content="Overwrite Existing Files" HorizontalAlignment="Center" VerticalAlignment="Stretch" Margin="0,10,0,0" Checked="cbOverwrite_Checked" />
+            <Button x:Name="btnAction" Content="Start" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,15,0,0" Width="100" Height="50" Click="btnAction_Click"/>
             <TextBlock x:Name="txtStatus" Margin="0,10,0,0" Text="Idle..." HorizontalAlignment="Center" />
             <ProgressBar x:Name="pbProgress" Margin="0,5,0,0" Height="25" />
         </StackPanel>
