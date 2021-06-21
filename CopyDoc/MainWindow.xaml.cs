@@ -24,16 +24,55 @@ namespace CopyDoc
     public partial class MainWindow : Window
     {
         public bool IsCopying { get; set; }
-        public int ProcessedFiles { get; set; }
-        public int TotalFiles { get; set; }
+        public long LastProcessed { get; set; }
+        public long TotalProcessed { get; set; }
+        public long TotalAmount { get; set; }
         public string SourceDir { get; set; }
         public string TargetDir { get; set; }
         private BackgroundWorker bw;
-        private Queue<long> snapshots = new(30);
+        private Queue<long> Snapshots = new(30);
+        private bool OverwriteExisting = false;
+
+        private System.Timers.Timer _elapsedTimer;
 
         public MainWindow()
         {
             InitializeComponent();
+            _elapsedTimer = new(1000D);
+            _elapsedTimer.AutoReset = true;
+            _elapsedTimer.Elapsed += (sender, e) =>
+            {
+                // Remember only the last 30 snapshots; discard older snapshots
+                if (Snapshots.Count == 30)
+                {
+                    Snapshots.Dequeue();
+                }
+                var _processed = LastProcessed;
+                Snapshots.Enqueue(Interlocked.Exchange(ref _processed, 0L));
+                LastProcessed = _processed;
+
+                var averageSpeed = Snapshots.Average();
+                var bytesLeft = TotalProcessed - TotalAmount;
+                Console.WriteLine("Average speed: {0:#} MBytes / second", averageSpeed / (1024 * 1024));
+                if (averageSpeed > 0)
+                {
+                    var timeLeft = TimeSpan.FromSeconds(bytesLeft / averageSpeed);
+                    var timeLeftRounded = TimeSpan.FromSeconds(Math.Round(timeLeft.TotalSeconds));
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        txtStatus.Text = "Time left: " + timeLeftRounded;
+                    });
+                    
+                }
+                else
+                {
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        txtStatus.Text = "Time left: Infinite";
+                    });
+                    
+                }
+            };
         }
 
         public void StartCopy()
@@ -45,58 +84,113 @@ namespace CopyDoc
             }
             else
             {
+                _elapsedTimer.Start();
                 using (bw = new BackgroundWorker())
                 {
                     bw.WorkerSupportsCancellation = true;
                     bw.DoWork += OnCopy;
+                    bw.RunWorkerCompleted += OnComplete;
+                    bw.RunWorkerAsync();
                 }
             }
             
+        }
+
+        private void OnComplete(object sender, RunWorkerCompletedEventArgs e)
+        {
+            //Stop the clock on the estimator
+            _elapsedTimer.Stop();
+
+            if (e.Cancelled)
+            {
+                this.Dispatcher.Invoke(() =>
+                {
+                    txtStatus.Text = "Copy Cancelled";
+                });
+                
+            }
+            else if (e.Error is not null)
+            {
+                if (e.Error.InnerException is not null)
+                {
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        txtStatus.Text = e.Error.InnerException.Message;
+                    });
+                }
+                else
+                {
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        txtStatus.Text = e.Error.Message;
+                    });
+                }
+            }
+            else
+            {
+                this.Dispatcher.Invoke(() =>
+                {
+                    txtStatus.Text = "Copy Completed";
+                });
+                
+            }
         }
 
         private void OnCopy(object sender, DoWorkEventArgs e)
         {
             try
             {
+                //Grab the files from the source directory
+                DirectoryInfo sourceInfo = new(SourceDir);
+                FileInfo[] sourceFiles = sourceInfo.GetFiles();
 
+                for (int i = 0; i < sourceFiles.Length; i++)
+                {
+                    FileInfo info = sourceFiles[i];
+                    TotalAmount += info.Length;
+                }
+
+                //Grab the files for the target (we might not need this later, but grabbing this now JIC)
+                DirectoryInfo targetInfo = new(TargetDir);
+                FileInfo[] targetFiles = sourceInfo.GetFiles();
+
+                //Lets move the files over now
+                for (int i = 0; i < sourceFiles.Length; i++)
+                {
+                    //Cancel if we have received the instruction to do so
+                    if (bw.CancellationPending)
+                    {
+                        return;
+                    }
+
+                    FileInfo info = sourceFiles[i];
+                    
+                    //Point at the new directory with the current file name
+                    string newFullName = targetInfo.FullName + @"\" + info.Name;
+
+                    //Copy
+                    info.CopyTo(newFullName, OverwriteExisting);
+
+                    //Update the total amount of data moved so far
+                    TotalProcessed += info.Length;
+
+                    //Update the ProgressBar, invoking to avoid exceptions from modifying UI components from another thread
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        pbProgress.Value = Math.Round((double)TotalProcessed / (double)TotalAmount) * 100;
+                    });
+                }
             }
             catch (Exception)
             {
-
-                throw;
+                //We wont do anything here, for now, but we should do something at some point...
             }
-            throw new NotImplementedException();
         }
 
         public void OpenSource()
         {
             using (var dialog = new System.Windows.Forms.FolderBrowserDialog())
             {
-                var timer = new System.Timers.Timer(1000D);
-                timer.Elapsed += (sender, e) =>
-                {
-                    // Remember only the last 30 snapshots; discard older snapshots
-                    if (snapshots.Count == 30)
-                    {
-                        snapshots.Dequeue();
-                    }
-
-                    snapshots.Enqueue(Interlocked.Exchange(ref currentBytesTransferred, 0L));
-                    var averageSpeed = snapshots.Average();
-                    var bytesLeft = fileSize - totalBytesTransferred;
-                    Console.WriteLine("Average speed: {0:#} MBytes / second", averageSpeed / (1024 * 1024));
-                    if (averageSpeed > 0)
-                    {
-                        var timeLeft = TimeSpan.FromSeconds(bytesLeft / averageSpeed);
-                        var timeLeftRounded = TimeSpan.FromSeconds(Math.Round(timeLeft.TotalSeconds));
-                        Console.WriteLine("Time left: {0}", timeLeftRounded);
-                    }
-                    else
-                    {
-                        Console.WriteLine("Time left: Infinite");
-                    }
-                };
-
                 dialog.ShowNewFolderButton = true;
                 dialog.UseDescriptionForTitle = true;
                 dialog.Description = "Select a Source Path";
@@ -135,6 +229,11 @@ namespace CopyDoc
         private void btnAction_Click(object sender, RoutedEventArgs e)
         {
             StartCopy();
+        }
+
+        private void cbOverwrite_Checked(object sender, RoutedEventArgs e)
+        {
+            OverwriteExisting = !OverwriteExisting;
         }
     }
 }
